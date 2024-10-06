@@ -1,0 +1,6 @@
+# Binaries
+udp_server
+
+# Go build cache
+/bin/
+/obj/
