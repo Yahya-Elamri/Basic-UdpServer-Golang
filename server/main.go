@@ -63,6 +63,19 @@ func (s *Server) Read() {
 		fmt.Printf("Received %d bytes from %s: %s\n", n, remoteAddr, message)
 
 		// Register client if it's not already in the list
+		go s.HandleClients(remoteAddr, message)
+		// Broadcast the message to all clients
+		s.Write(message, remoteAddr)
+	}
+}
+
+func (s *Server) HandleClients(remoteAddr *net.UDPAddr, message string) {
+	if message == "quit" {
+		s.mutex.Lock()
+		delete(s.Game.players, remoteAddr.String())
+		fmt.Printf("client disconnected: %s \n", remoteAddr)
+		s.mutex.Unlock()
+	} else {
 		s.mutex.Lock()
 		if _, ok := s.Game.players[remoteAddr.String()]; !ok {
 			PlayerId := len(s.Game.players) + 1
@@ -70,9 +83,6 @@ func (s *Server) Read() {
 			fmt.Printf("New client connected: %s (ID: %d)\n", remoteAddr, PlayerId)
 		}
 		s.mutex.Unlock()
-
-		// Broadcast the message to all clients
-		s.Write(message, remoteAddr)
 	}
 }
 
