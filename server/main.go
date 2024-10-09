@@ -14,7 +14,6 @@ const (
 type Player struct {
 	id   int
 	x, y int
-	hp   int
 	addr *net.UDPAddr
 }
 
@@ -79,7 +78,7 @@ func (s *Server) HandleClients(remoteAddr *net.UDPAddr, message string) {
 		s.mutex.Lock()
 		if _, ok := s.Game.players[remoteAddr.String()]; !ok {
 			PlayerId := len(s.Game.players) + 1
-			s.Game.players[remoteAddr.String()] = &Player{id: PlayerId, addr: remoteAddr, x: 5, y: 5, hp: 100}
+			s.Game.players[remoteAddr.String()] = &Player{id: PlayerId, addr: remoteAddr, x: 0, y: 0}
 			fmt.Printf("New client connected: %s (ID: %d)\n", remoteAddr, PlayerId)
 		}
 		s.mutex.Unlock()

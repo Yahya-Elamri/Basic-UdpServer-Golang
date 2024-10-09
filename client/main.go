@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
-	"os"
+
+	"github.com/eiannone/keyboard"
 )
 
 func main() {
@@ -39,28 +39,30 @@ func main() {
 }
 
 func writer(conn *net.UDPConn) {
-	scanner := bufio.NewScanner(os.Stdin)
+	if err := keyboard.Open(); err != nil {
+		panic(err)
+	}
+	defer func() {
+		_ = keyboard.Close()
+	}()
+
+	fmt.Println("Press ESC to quit")
 	for {
-		fmt.Print("Enter message to send (or 'quit' to exit): ")
-		if scanner.Scan() {
-			message := scanner.Text()
-			if message == "quit" {
-				_, err := conn.Write([]byte(message))
-				if err != nil {
-					fmt.Println("Error sending message:", err)
-					return
-				}
-				fmt.Println("Exiting...")
-				os.Exit(0)
-			}
-			_, err := conn.Write([]byte(message))
+		char, key, err := keyboard.GetKey()
+		if err != nil {
+			panic(err)
+		}
+		if key == keyboard.KeyEsc {
+			_, err = conn.Write([]byte("quit"))
 			if err != nil {
 				fmt.Println("Error sending message:", err)
 				return
 			}
+			break
 		} else {
-			if err := scanner.Err(); err != nil {
-				fmt.Println("Error reading input:", err)
+			_, err = conn.Write([]byte(string(char)))
+			if err != nil {
+				fmt.Println("Error sending message:", err)
 				return
 			}
 		}
