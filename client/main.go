@@ -1,11 +1,17 @@
 package main
 
 import (
+	"UdpServer/utils"
 	"fmt"
 	"net"
 
 	"github.com/eiannone/keyboard"
 )
+
+type Player struct {
+	ID   int
+	X, Y int
+}
 
 func main() {
 	serverAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:3000")
@@ -21,20 +27,30 @@ func main() {
 	}
 	defer conn.Close()
 
+	_, err = conn.Write([]byte("connect"))
+	if err != nil {
+		fmt.Println("Error sending connect message:", err)
+		return
+	}
+
 	fmt.Println("Connected to server at", serverAddr)
 	buffer := make([]byte, 1024)
 
-	// Start the writer goroutine to handle user input
 	go writer(conn)
 
-	// Reader loop on the main thread
 	for {
-		n, addr, err := conn.ReadFromUDP(buffer)
+		n, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			fmt.Println("Error reading from UDP:", err)
 			return
 		}
-		fmt.Printf("\nReceived from %s: %s\n", addr, string(buffer[:n]))
+
+		player, err := utils.DecodePlayer(buffer[:n])
+		if err != nil {
+			fmt.Println("Error decoding:", err)
+		}
+
+		fmt.Printf("Received player struct: %+v\n", player)
 	}
 }
 

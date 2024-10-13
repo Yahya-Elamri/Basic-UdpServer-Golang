@@ -1,6 +1,8 @@
 package main
 
 import (
+	"UdpServer/module"
+	"UdpServer/utils"
 	"fmt"
 	"net"
 	"sync"
@@ -11,15 +13,9 @@ const (
 	bufferSize = 1024
 )
 
-type Player struct {
-	id   int
-	x, y int
-	addr *net.UDPAddr
-}
-
 type GameState struct {
 	round   int
-	players map[string]*Player
+	players map[string]*module.Player
 }
 
 type Server struct {
@@ -43,7 +39,7 @@ func NewServer() (*Server, error) {
 		conn: conn,
 		Game: GameState{
 			round:   0,
-			players: make(map[string]*Player),
+			players: make(map[string]*module.Player),
 		},
 	}, nil
 
@@ -61,41 +57,68 @@ func (s *Server) Read() {
 		message := string(buffer[:n])
 		fmt.Printf("Received %d bytes from %s: %s\n", n, remoteAddr, message)
 
-		// Register client if it's not already in the list
 		go s.HandleClients(remoteAddr, message)
-		// Broadcast the message to all clients
 		s.Write(message, remoteAddr)
 	}
 }
 
 func (s *Server) HandleClients(remoteAddr *net.UDPAddr, message string) {
-	if message == "quit" {
+	if message == "connect" {
+		s.mutex.Lock()
+		if _, ok := s.Game.players[remoteAddr.String()]; !ok {
+			PlayerId := len(s.Game.players) + 1
+			s.Game.players[remoteAddr.String()] = &module.Player{ID: PlayerId, Addr: remoteAddr, X: 0, Y: 0}
+			fmt.Printf("New client connected: %s (ID: %d)\n", remoteAddr, PlayerId)
+		}
+		s.mutex.Unlock()
+	} else if message == "quit" {
 		s.mutex.Lock()
 		delete(s.Game.players, remoteAddr.String())
 		fmt.Printf("client disconnected: %s \n", remoteAddr)
 		s.mutex.Unlock()
 	} else {
 		s.mutex.Lock()
-		if _, ok := s.Game.players[remoteAddr.String()]; !ok {
-			PlayerId := len(s.Game.players) + 1
-			s.Game.players[remoteAddr.String()] = &Player{id: PlayerId, addr: remoteAddr, x: 0, y: 0}
-			fmt.Printf("New client connected: %s (ID: %d)\n", remoteAddr, PlayerId)
-		}
+		_, exists := s.Game.players[remoteAddr.String()]
 		s.mutex.Unlock()
+
+		if !exists {
+			fmt.Printf("Received game data from unregistered client %s\n", remoteAddr)
+		}
 	}
 }
 
+func (s *Server) handleGameLogic(message string, sender *net.UDPAddr) ([]byte, error) {
+	player, exists := s.Game.players[sender.String()]
+	if !exists {
+		fmt.Printf("Player not found for address %s\n", sender.String())
+		return nil, fmt.Errorf("player not found")
+	}
+
+	switch message {
+	case "z":
+		player.Y = player.Y + 1
+	case "s":
+		player.Y = player.Y - 1
+	case "d":
+		player.X = player.X + 1
+	case "q":
+		player.X = player.X - 1
+	}
+
+	return utils.EncodePlayer(*player)
+}
+
 func (s *Server) Write(message string, sender *net.UDPAddr) {
+	buffer, _ := s.handleGameLogic(message, sender)
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-
 	for _, client := range s.Game.players {
-		if client.addr.String() != sender.String() { // Don't send back to the sender
-			_, err := s.conn.WriteToUDP([]byte(message), client.addr)
+		if client.Addr.String() != sender.String() {
+			_, err := s.conn.WriteToUDP(buffer, client.Addr)
 			if err != nil {
-				fmt.Printf("Error sending to %s: %v\n", client.addr, err)
+				fmt.Printf("Error sending to %s: %v\n", client.Addr, err)
 			} else {
-				fmt.Printf("Sent message to %s: %s\n", client.addr, message)
+				fmt.Printf("Sent message to %s: %s\n", client.Addr, message)
 			}
 		}
 	}
