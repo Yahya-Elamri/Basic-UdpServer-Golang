@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 const (
 	addr       = "127.0.0.1:3000"
 	bufferSize = 1024
+	tickRate   = 128
 )
 
 type GameState struct {
@@ -42,7 +44,6 @@ func NewServer() (*Server, error) {
 			players: make(map[string]*module.Player),
 		},
 	}, nil
-
 }
 
 func (s *Server) Read() {
@@ -58,31 +59,26 @@ func (s *Server) Read() {
 		fmt.Printf("Received %d bytes from %s: %s\n", n, remoteAddr, message)
 
 		go s.HandleClients(remoteAddr, message)
-		s.Write(message, remoteAddr)
 	}
 }
 
 func (s *Server) HandleClients(remoteAddr *net.UDPAddr, message string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if message == "connect" {
-		s.mutex.Lock()
 		if _, ok := s.Game.players[remoteAddr.String()]; !ok {
 			PlayerId := len(s.Game.players) + 1
 			s.Game.players[remoteAddr.String()] = &module.Player{ID: PlayerId, Addr: remoteAddr, X: 0, Y: 0}
 			fmt.Printf("New client connected: %s (ID: %d)\n", remoteAddr, PlayerId)
 		}
-		s.mutex.Unlock()
 	} else if message == "quit" {
-		s.mutex.Lock()
 		delete(s.Game.players, remoteAddr.String())
-		fmt.Printf("client disconnected: %s \n", remoteAddr)
-		s.mutex.Unlock()
+		fmt.Printf("Client disconnected: %s\n", remoteAddr)
 	} else {
-		s.mutex.Lock()
-		_, exists := s.Game.players[remoteAddr.String()]
-		s.mutex.Unlock()
-
-		if !exists {
-			fmt.Printf("Received game data from unregistered client %s\n", remoteAddr)
+		_, err := s.handleGameLogic(message, remoteAddr)
+		if err != nil {
+			fmt.Printf("Error processing game logic for %s: %v\n", remoteAddr, err)
 		}
 	}
 }
@@ -96,31 +92,47 @@ func (s *Server) handleGameLogic(message string, sender *net.UDPAddr) ([]byte, e
 
 	switch message {
 	case "z":
-		player.Y = player.Y + 1
+		player.Y += 1
 	case "s":
-		player.Y = player.Y - 1
+		player.Y -= 1
 	case "d":
-		player.X = player.X + 1
+		player.X += 1
 	case "q":
-		player.X = player.X - 1
+		player.X -= 1
 	}
 
-	return utils.EncodePlayer(*player)
+	return nil, nil
 }
 
-func (s *Server) Write(message string, sender *net.UDPAddr) {
-	buffer, _ := s.handleGameLogic(message, sender)
+func (s *Server) BroadcastGameState() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
 	for _, client := range s.Game.players {
-		if client.Addr.String() != sender.String() {
-			_, err := s.conn.WriteToUDP(buffer, client.Addr)
+		state, err := utils.EncodePlayer(*client)
+		if err != nil {
+			fmt.Printf("Error encoding player state for %s: %v\n", client.Addr, err)
+			continue
+		}
+
+		for _, otherClient := range s.Game.players {
+			_, err := s.conn.WriteToUDP(state, otherClient.Addr)
 			if err != nil {
-				fmt.Printf("Error sending to %s: %v\n", client.Addr, err)
+				fmt.Printf("Error sending to %s: %v\n", otherClient.Addr, err)
 			} else {
-				fmt.Printf("Sent message to %s: %s\n", client.Addr, message)
+				fmt.Printf("Sent state update to %s\n", otherClient.Addr)
 			}
 		}
+	}
+}
+
+func (s *Server) StartTickLoop() {
+	ticker := time.NewTicker(time.Second / tickRate)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+		s.BroadcastGameState()
 	}
 }
 
@@ -134,6 +146,6 @@ func main() {
 
 	fmt.Println("Server started on", server.conn.LocalAddr())
 
-	// Start reading and broadcasting messages
-	server.Read()
+	go server.Read()
+	server.StartTickLoop()
 }
